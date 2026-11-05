@@ -20,7 +20,7 @@ git push ──► GitHub Actions / Jenkins ──► Maven (compile, test, pack
 | Registry | GitHub Container Registry, `ghcr.io/nandanreddy17/java-cicd-demo` |
 | Orchestration | Azure Kubernetes Service (free control-plane tier), created with the Azure CLI |
 | Deployment automation | Ansible (`ansible/deploy.yml`) |
-| Cloud | Microsoft Azure (Azure for Students), region Central India |
+| Cloud | Microsoft Azure (free trial, spending limit on), region Central India |
 
 ## Repository layout
 
@@ -38,8 +38,8 @@ k8s/service.yaml              LoadBalancer Service (public endpoint)
 ansible/deploy.yml            apply manifests, wait for rollout, verify endpoint
 ansible/inventory.ini         localhost (runs on the CI runner)
 infra/azure/setup-aks.sh      one-time Azure setup: resource group, AKS, CI service account + kubeconfig
-infra/azure/ci-rbac.yaml      least-privilege Kubernetes identity for the pipelines
-infra/aws/                    first attempt on AWS EKS (blocked by the AWS Free plan; kept for the record)
+infra/ci-rbac.yaml            least-privilege Kubernetes identity for the pipelines
+infra/aws/                    attempts on AWS EKS and Lightsail (blocked by the AWS Free plan; kept for the record)
 ```
 
 ## Endpoints
@@ -103,16 +103,17 @@ docker build -t java-cicd-demo . && docker run --rm -p 8080:8080 java-cicd-demo
 
 ## One-time cloud setup
 
-Prerequisites: Azure for Students subscription, and on your PC: Azure CLI, `kubectl`, Git Bash.
+Prerequisites: an Azure subscription (free trial works: 4 vCPU quota, spending limit on), and on your
+PC: Azure CLI, `kubectl`, Git Bash.
 
 1. `az login` (opens the browser).
 2. From the repo root in Git Bash: `bash infra/azure/setup-aks.sh`. It creates the resource group and AKS
-   cluster (~5–10 min), a least-privilege service account `ci-deployer`, and writes its kubeconfig to
-   `~/java-cicd-ci.kubeconfig` (outside the repo).
+   cluster (1 × Standard_B2s_v2 node, free control-plane tier, ~5–10 min), a least-privilege service
+   account `ci-deployer`, and writes its kubeconfig to `~/java-cicd-ci.kubeconfig` (outside the repo).
 3. GitHub repo → Settings → Secrets and variables → Actions:
    secret `KUBECONFIG` = contents of that file; variable `CLOUD_DEPLOY` = `true`.
-4. Make the container image public once: GitHub profile → Packages → `java-cicd-demo` →
-   Package settings → Change visibility → Public (so AKS can pull it without a password).
+4. The GHCR image inherits the public repo's visibility, so AKS pulls it without a password. (If your
+   package is private, make it public under Packages → `java-cicd-demo` → Package settings.)
 5. Re-run the pipeline. Get the URL with `kubectl get svc java-cicd-demo` (EXTERNAL-IP), or from the
    last Ansible step in the log.
 
