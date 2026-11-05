@@ -1,0 +1,20 @@
+# Start Jenkins:  cd jenkins && docker compose up -d --build   ->  http://localhost:8081
+# Stop:           docker compose down            (data is kept in the jenkins_home volume)
+services:
+  jenkins:
+    build: .
+    container_name: jenkins
+    # root so the pipeline can use the host Docker socket; acceptable for a local demo only
+    user: root
+    ports:
+      - "8081:8080"
+    env_file: .env
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - maven_repo:/root/.m2
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+volumes:
+  jenkins_home:
+  maven_repo:

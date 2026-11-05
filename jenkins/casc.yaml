@@ -1,0 +1,48 @@
+# Jenkins Configuration as Code: Jenkins is fully configured from this file at startup,
+# so the server itself is reproducible (no manual clicking through setup screens).
+jenkins:
+  systemMessage: "CIA 2 - Java Calculator CI/CD"
+  numExecutors: 2
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: admin
+          password: "${JENKINS_ADMIN_PASSWORD}"     # comes from jenkins/.env (not in Git)
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+  globalNodeProperties:
+    - envVars:
+        env:
+          - key: AWS_DEPLOY                       # "true" turns on the ECR/EKS stages
+            value: "${AWS_DEPLOY:-false}"
+
+unclassified:
+  location:
+    url: "http://localhost:8081/"
+
+jobs:
+  - script: |
+      pipelineJob('java-cicd-demo') {
+        description('Calculator app: Maven -> Docker -> Amazon ECR -> Amazon EKS')
+        properties {
+          pipelineTriggers {
+            triggers {
+              pollSCM { scmpoll_spec('* * * * *') }
+            }
+          }
+        }
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote { url('https://github.com/NandanReddY17/java-cicd-demo.git') }
+                branch('*/main')
+              }
+            }
+            scriptPath('Jenkinsfile')
+            lightweight(true)
+          }
+        }
+      }
