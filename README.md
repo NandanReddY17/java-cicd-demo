@@ -1,13 +1,14 @@
-# End-to-End Cloud CI/CD Pipeline on AWS (CIA 2)
+# End-to-End Cloud CI/CD Pipeline (CIA 2)
 
 A **Simple Calculator** web app (Java 21 / Spring Boot) that is automatically built, tested,
-containerised and deployed to Amazon EKS on every `git push`. The browser page collects input;
-the Java REST API does the calculation (add, subtract, multiply, divide, modulo, power).
+containerised and deployed to **Azure Kubernetes Service (AKS)** on every `git push`. The browser
+page collects input; the Java REST API does the calculation (add, subtract, multiply, divide,
+modulo, power).
 
 ```
-git push ──► GitHub Actions ──► Maven (compile, test, package) ──► Docker build
-                                                                     │
-   Browser ◄── AWS Load Balancer ◄── EKS pods ◄── Ansible deploy ◄── Amazon ECR
+git push ──► GitHub Actions / Jenkins ──► Maven (compile, test, package) ──► Docker build
+                                                                               │
+   Browser ◄── Azure Load Balancer ◄── AKS pods ◄── Ansible deploy ◄── GitHub Container Registry
 ```
 
 | Concern | Tool |
@@ -16,15 +17,17 @@ git push ──► GitHub Actions ──► Maven (compile, test, package) ─�
 | CI/CD orchestration | GitHub Actions (`.github/workflows/ci-cd.yml`) and Jenkins (`Jenkinsfile`, `jenkins/`) |
 | Build & unit tests | Maven + JUnit 5 / MockMvc |
 | Containerisation | Docker (`Dockerfile`, `.dockerignore`) |
-| Registry | Amazon ECR (scan on push) |
-| Orchestration | Amazon EKS (Kubernetes), created with `eksctl` |
+| Registry | GitHub Container Registry, `ghcr.io/nandanreddy17/java-cicd-demo` |
+| Orchestration | Azure Kubernetes Service (free control-plane tier), created with the Azure CLI |
 | Deployment automation | Ansible (`ansible/deploy.yml`) |
-| Cloud | AWS, region `ap-south-1` (Mumbai) |
+| Cloud | Microsoft Azure (Azure for Students), region Central India |
 
 ## Repository layout
 
 ```
-.github/workflows/ci-cd.yml   pipeline: build-test -> docker -> deploy
+.github/workflows/ci-cd.yml   GitHub Actions pipeline: build-test -> docker -> deploy
+Jenkinsfile                   Jenkins pipeline (same stages + container smoke test)
+jenkins/                      Jenkins in Docker: Dockerfile, plugins.txt, casc.yaml, docker-compose.yml
 src/main/java/.../            CalculatorService (maths), CalculatorController (REST API), HomeController (info)
 src/main/resources/static/    index.html calculator page
 src/test/java/.../            19 unit tests (JUnit 5 + MockMvc)
@@ -34,9 +37,9 @@ k8s/deployment.yaml.j2        Deployment (image tag filled in by Ansible)
 k8s/service.yaml              LoadBalancer Service (public endpoint)
 ansible/deploy.yml            apply manifests, wait for rollout, verify endpoint
 ansible/inventory.ini         localhost (runs on the CI runner)
-infra/eks-cluster.yaml        eksctl cluster definition
-infra/setup-aws.sh            one-time AWS setup (ECR, EKS, CI IAM user)
-infra/ci-iam-policy.json      least-privilege policy for the CI user
+infra/azure/setup-aks.sh      one-time Azure setup: resource group, AKS, CI service account + kubeconfig
+infra/azure/ci-rbac.yaml      least-privilege Kubernetes identity for the pipelines
+infra/aws/                    first attempt on AWS EKS (blocked by the AWS Free plan; kept for the record)
 ```
 
 ## Endpoints
@@ -48,15 +51,16 @@ infra/ci-iam-policy.json      least-privilege policy for the CI user
 | `/api/info` | page title message, version, `build` (Git SHA of running image), `servedBy` (pod name) |
 | `/actuator/health/readiness`, `/liveness` | Kubernetes probes |
 
-## Pipeline stages
+## GitHub Actions pipeline
 
 | Job | Steps | Purpose |
 |---|---|---|
 | **Build & Test** | Checkout → Compile → Run unit tests → Package JAR | fail fast; nothing broken gets an image |
-| **Docker Build & Push** | Login to ECR → tag with Git SHA + `latest` → push | immutable, traceable artifact |
-| **Deploy to EKS & Verify** | `update-kubeconfig` → Ansible: render manifest, `kubectl apply`, `rollout status`, wait for LB, HTTP check that `build` == new SHA | proves the new version is live |
+| **Docker Build & Push** | Login to ghcr.io with the built-in `GITHUB_TOKEN` → tag with Git SHA + `latest` → push | immutable, traceable artifact |
+| **Deploy to AKS & Verify** | kubeconfig from the `KUBECONFIG` secret → Ansible: render manifest, `kubectl apply`, `rollout status`, wait for the LB IP, HTTP check that `build` == new SHA | proves the new version is live |
 
-Pull requests run only the first job.
+Pull requests run only the first job. The deploy job runs when the repository variable
+`CLOUD_DEPLOY` is `true`.
 
 ## Jenkins pipeline (`Jenkinsfile`)
 
@@ -68,12 +72,12 @@ The same pipeline is also implemented in Jenkins, running in Docker on the devel
 | Compile / Unit Tests / Package | `mvn compile`, `mvn test` (JUnit report published), `mvn package` (JAR archived) |
 | Docker Build | `java-cicd-demo:<sha>` and `:latest` |
 | Container Smoke Test | start the new image, call `/api/calculate` (6×7 = 42) and `/api/info` (build = SHA) |
-| Push to Amazon ECR | only when `AWS_DEPLOY=true` |
-| Deploy to EKS (Ansible) | same `ansible/deploy.yml` as GitHub Actions |
+| Push to GHCR | only when `CLOUD_DEPLOY=true` |
+| Deploy to AKS (Ansible) | same `ansible/deploy.yml` as GitHub Actions |
 | Verify Deployment | `kubectl get deployment/pods/service`, rollout history |
 
 Jenkins itself is configured as code: `jenkins/Dockerfile` (Jenkins + Maven, Docker CLI, kubectl,
-AWS CLI, Ansible), `jenkins/plugins.txt`, and `jenkins/casc.yaml` (admin user, `AWS_DEPLOY` env var,
+Ansible), `jenkins/plugins.txt`, and `jenkins/casc.yaml` (admin user, `CLOUD_DEPLOY` env var,
 and the `java-cicd-demo` pipeline job created with Job DSL). GitHub cannot reach a Jenkins running on a
 laptop, so the job **polls GitHub every minute** (`pollSCM`) instead of using a webhook.
 
@@ -83,9 +87,10 @@ cp .env.example .env          # set JENKINS_ADMIN_PASSWORD
 docker compose up -d --build  # http://localhost:8081  (user: admin)
 ```
 
-To enable the AWS stages: in Jenkins add a *Username with password* credential with ID `aws-creds`
-(username = access key ID, password = secret key), set `AWS_DEPLOY=true` in `jenkins/.env`, then
-`docker compose up -d`. Enable AWS deploys in **either** Jenkins **or** GitHub Actions, not both,
+To enable the cloud stages in Jenkins, add two credentials (Manage Jenkins → Credentials → global):
+`ghcr-creds` (*Username with password*: GitHub username + a personal access token with `write:packages`)
+and `kubeconfig` (*Secret file*: the CI kubeconfig). Then set `CLOUD_DEPLOY=true` in `jenkins/.env` and
+run `docker compose up -d`. Enable cloud deploys in **either** Jenkins **or** GitHub Actions, not both,
 so the two pipelines don't deploy the same commit twice.
 
 ## Run locally
@@ -96,39 +101,43 @@ mvn spring-boot:run              # http://localhost:8080/
 docker build -t java-cicd-demo . && docker run --rm -p 8080:8080 java-cicd-demo
 ```
 
-## One-time setup
+## One-time cloud setup
 
-Prerequisites: AWS account, GitHub account, and on your PC: AWS CLI v2, `eksctl`, `kubectl`, Git Bash.
+Prerequisites: Azure for Students subscription, and on your PC: Azure CLI, `kubectl`, Git Bash.
 
-1. `aws configure` with your own admin IAM user's access key, region `ap-south-1`.
-2. From the repo root in Git Bash: `bash infra/setup-aws.sh` (creates ECR repo, EKS cluster ~15–20 min,
-   a least-privilege IAM user `github-actions-cicd`, and grants it deploy rights in the `default` namespace).
-3. AWS console → IAM → Users → `github-actions-cicd` → Security credentials → Create access key.
-4. GitHub repo → Settings → Secrets and variables → Actions → add `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
-5. Push to `main`. The pipeline creates the Deployment and Service on the first run.
-6. Get the URL: `kubectl get svc java-cicd-demo` (EXTERNAL-IP column), or read it from the last Ansible step in the Actions log.
+1. `az login` (opens the browser).
+2. From the repo root in Git Bash: `bash infra/azure/setup-aks.sh`. It creates the resource group and AKS
+   cluster (~5–10 min), a least-privilege service account `ci-deployer`, and writes its kubeconfig to
+   `~/java-cicd-ci.kubeconfig` (outside the repo).
+3. GitHub repo → Settings → Secrets and variables → Actions:
+   secret `KUBECONFIG` = contents of that file; variable `CLOUD_DEPLOY` = `true`.
+4. Make the container image public once: GitHub profile → Packages → `java-cicd-demo` →
+   Package settings → Change visibility → Public (so AKS can pull it without a password).
+5. Re-run the pipeline. Get the URL with `kubectl get svc java-cicd-demo` (EXTERNAL-IP), or from the
+   last Ansible step in the log.
 
 ## Demonstrating a change
 
 1. Edit the `message` (page title) in `src/main/java/com/example/cicddemo/HomeController.java` **and** the expected text in `HomeControllerTest.java`.
-2. `git commit -am "Change greeting" && git push`
-3. Watch Actions run automatically. A new image tag (the new short SHA) appears in ECR.
+2. `git commit -am "Change title" && git push`
+3. Watch the pipeline run automatically. A new image tag (the new short SHA) appears in GHCR.
 4. `kubectl rollout history deployment/java-cicd-demo` shows a new revision.
 5. Refresh the URL: the new title appears, and the footer's `build` equals the new commit SHA.
 
-## Clean up (avoid charges)
+## Clean up (avoid using credit)
 
 ```bash
-kubectl delete -f k8s/service.yaml        # removes the load balancer first
-eksctl delete cluster -f infra/eks-cluster.yaml
-aws ecr delete-repository --repository-name java-cicd-demo --force --region ap-south-1
+az group delete --name java-cicd-rg --yes --no-wait   # deletes AKS, its VM, disk and load balancer
 ```
 
 ## Security notes
 
-- No secrets in Git: AWS keys live in GitHub encrypted secrets; `.gitignore` excludes kubeconfig and `.env`.
-- The CI IAM user can only push to one ECR repo and describe one cluster; inside Kubernetes it has
-  `AmazonEKSEditPolicy` scoped to the `default` namespace only.
-- Images are tagged with the Git commit SHA (immutable, traceable, easy rollback); ECR scans each push.
+- No secrets in Git: the CI kubeconfig lives in GitHub encrypted secrets / Jenkins credentials;
+  `.gitignore` excludes kubeconfig files and `.env`.
+- The pipelines use a Kubernetes service account that can only manage Deployments and Services in the
+  `default` namespace (it cannot read Secrets or touch other namespaces). No Azure admin credentials
+  are given to CI.
+- GitHub Actions pushes images with the short-lived built-in `GITHUB_TOKEN`; no registry password is stored.
+- Images are tagged with the Git commit SHA (immutable, traceable, easy rollback).
 - Containers run as non-root (uid 10001), read-only root filesystem, all Linux capabilities dropped,
   CPU/memory limits set.
