@@ -13,6 +13,8 @@ services:
       - jenkins_home:/var/jenkins_home
       - maven_repo:/root/.m2
       - /var/run/docker.sock:/var/run/docker.sock
+      # Config as Code is mounted (not baked in), so edits apply on `docker compose up -d`
+      - ./casc.yaml:/usr/share/jenkins/casc.yaml:ro
     restart: unless-stopped
 
 volumes:

@@ -1,0 +1,51 @@
+# Least-privilege identity for the CI/CD pipelines (GitHub Actions and Jenkins).
+# It can only manage Deployments and Services in the "default" namespace and read pods.
+# Applied by infra/azure/setup-aks.sh, which also builds a kubeconfig from its token.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ci-deployer
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ci-deployer
+  namespace: default
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]          # needed by "kubectl rollout status/history"
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ci-deployer
+  namespace: default
+subjects:
+  - kind: ServiceAccount
+    name: ci-deployer
+    namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ci-deployer
+---
+# Long-lived token for the service account (Kubernetes fills in .data.token).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ci-deployer-token
+  namespace: default
+  annotations:
+    kubernetes.io/service-account.name: ci-deployer
+type: kubernetes.io/service-account-token

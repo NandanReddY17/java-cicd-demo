@@ -1,4 +1,4 @@
-# End-to-end CI/CD: GitHub -> Maven -> Docker -> Amazon ECR -> Amazon EKS
+# End-to-end CI/CD: GitHub -> Maven -> Docker -> GitHub Container Registry -> Azure Kubernetes Service
 # Runs automatically on every push to main. Pull requests only build and test.
 name: CI/CD Pipeline
 
@@ -15,9 +15,8 @@ concurrency:                      # never run two deployments at once
   cancel-in-progress: false
 
 env:
-  AWS_REGION: ap-south-1
-  EKS_CLUSTER: java-cicd-cluster
-  ECR_REPOSITORY: java-cicd-demo
+  REGISTRY: ghcr.io
+  IMAGE_NAME: java-cicd-demo
 
 permissions:
   contents: read
@@ -63,12 +62,13 @@ jobs:
 
   # ---------- Stage 4-5: build, tag and push the image ----------
   docker:
-    name: Docker Build & Push (ECR)
+    name: Docker Build & Push (GHCR)
     needs: build-test
-    # Runs only on pushes, and only after AWS is connected
-    # (repo Settings > Secrets and variables > Actions > Variables: AWS_DEPLOY = true).
-    if: github.event_name != 'pull_request' && vars.AWS_DEPLOY == 'true'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write             # lets the built-in GITHUB_TOKEN push to ghcr.io
     outputs:
       image: ${{ steps.meta.outputs.image }}
       sha: ${{ steps.meta.outputs.sha }}
@@ -82,53 +82,55 @@ jobs:
           name: app-jar
           path: target/
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Log in to Amazon ECR
-        id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Compute image tag (Git commit SHA)
         id: meta
         run: |
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"          # registry names must be lowercase
           SHA="${GITHUB_SHA::7}"
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-          echo "image=${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:$SHA" >> "$GITHUB_OUTPUT"
+          echo "repo=$REGISTRY/$OWNER/$IMAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "image=$REGISTRY/$OWNER/$IMAGE_NAME:$SHA" >> "$GITHUB_OUTPUT"
 
       - name: Build and tag Docker image
         run: |
           docker build \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
             -t "${{ steps.meta.outputs.image }}" \
-            -t "${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:latest" .
+            -t "${{ steps.meta.outputs.repo }}:latest" .
 
-      - name: Push image to ECR
+      - name: Push image to GHCR
         run: |
           docker push "${{ steps.meta.outputs.image }}"
-          docker push "${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:latest"
+          docker push "${{ steps.meta.outputs.repo }}:latest"
 
-  # ---------- Stage 6-7: deploy to EKS with Ansible and verify ----------
+  # ---------- Stage 6-7: deploy to AKS with Ansible and verify ----------
   deploy:
-    name: Deploy to EKS & Verify
+    name: Deploy to AKS & Verify
     needs: docker
+    # Runs only after the cluster is connected
+    # (repo Settings > Secrets and variables > Actions > Variables: CLOUD_DEPLOY = true).
+    if: vars.CLOUD_DEPLOY == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Connect kubectl to EKS
-        run: aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"
+      - name: Connect kubectl to AKS
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
+        run: |
+          mkdir -p ~/.kube
+          printf '%s' "$KUBECONFIG_CONTENT" > ~/.kube/config
+          chmod 600 ~/.kube/config
+          kubectl version
+          kubectl get deployments
 
       - name: Install Ansible
         run: command -v ansible-playbook || pipx install ansible-core

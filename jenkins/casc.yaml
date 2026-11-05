@@ -15,8 +15,8 @@ jenkins:
   globalNodeProperties:
     - envVars:
         env:
-          - key: AWS_DEPLOY                       # "true" turns on the ECR/EKS stages
-            value: "${AWS_DEPLOY:-false}"
+          - key: CLOUD_DEPLOY                       # "true" turns on the GHCR push + AKS deploy stages
+            value: "${CLOUD_DEPLOY:-false}"
 
 unclassified:
   location:

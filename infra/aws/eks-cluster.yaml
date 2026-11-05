@@ -1,6 +1,6 @@
 # EKS cluster definition used by eksctl:
-#   eksctl create cluster -f infra/eks-cluster.yaml     (~15-20 min)
-#   eksctl delete cluster -f infra/eks-cluster.yaml     (after the viva, to stop charges)
+#   eksctl create cluster -f infra/aws/eks-cluster.yaml     (~15-20 min)
+#   eksctl delete cluster -f infra/aws/eks-cluster.yaml     (after the viva, to stop charges)
 apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
 

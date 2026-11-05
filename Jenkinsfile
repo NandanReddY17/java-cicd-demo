@@ -1,6 +1,8 @@
-// Jenkins CI/CD pipeline: GitHub -> Maven -> Docker -> (Amazon ECR -> Amazon EKS via Ansible)
-// The AWS stages run only when the Jenkins global env var AWS_DEPLOY is "true"
-// and a credential with ID "aws-creds" exists (username = access key ID, password = secret key).
+// Jenkins CI/CD pipeline: GitHub -> Maven -> Docker -> (GitHub Container Registry -> Azure AKS via Ansible)
+// The cloud stages run only when the Jenkins global env var CLOUD_DEPLOY is "true" and these
+// credentials exist in Jenkins:
+//   ghcr-creds  Username with password: GitHub username + personal access token (write:packages)
+//   kubeconfig  Secret file: kubeconfig of the CI service account (infra/azure/setup-aks.sh)
 pipeline {
     agent any
 
@@ -17,10 +19,8 @@ pipeline {
     }
 
     environment {
-        AWS_REGION     = 'ap-south-1'
-        EKS_CLUSTER    = 'java-cicd-cluster'
-        ECR_REPOSITORY = 'java-cicd-demo'
-        APP_NAME       = 'java-cicd-demo'
+        REGISTRY_REPO = 'ghcr.io/nandanreddy17/java-cicd-demo'   // registry names must be lowercase
+        APP_NAME      = 'java-cicd-demo'
     }
 
     stages {
@@ -95,49 +95,41 @@ pipeline {
             }
         }
 
-        stage('Push to Amazon ECR') {
-            when { environment name: 'AWS_DEPLOY', value: 'true' }
+        stage('Push to GHCR') {
+            when { environment name: 'CLOUD_DEPLOY', value: 'true' }
             steps {
-                withCredentials([usernamePassword(credentialsId: 'aws-creds',
-                        usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                withCredentials([usernamePassword(credentialsId: 'ghcr-creds',
+                        usernameVariable: 'GHCR_USER', passwordVariable: 'GHCR_TOKEN')]) {
                     sh '''
                         set +x
-                        ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-                        REGISTRY="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
-                        aws ecr get-login-password --region "$AWS_REGION" | docker login -u AWS --password-stdin "$REGISTRY"
-                        docker tag "$LOCAL_IMAGE" "$REGISTRY/$ECR_REPOSITORY:$GIT_SHA"
-                        docker tag "$LOCAL_IMAGE" "$REGISTRY/$ECR_REPOSITORY:latest"
-                        docker push "$REGISTRY/$ECR_REPOSITORY:$GIT_SHA"
-                        docker push "$REGISTRY/$ECR_REPOSITORY:latest"
-                        docker logout "$REGISTRY"
-                        echo "$REGISTRY/$ECR_REPOSITORY:$GIT_SHA" > image.txt
+                        echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+                        docker tag "$LOCAL_IMAGE" "$REGISTRY_REPO:$GIT_SHA"
+                        docker tag "$LOCAL_IMAGE" "$REGISTRY_REPO:latest"
+                        docker push "$REGISTRY_REPO:$GIT_SHA"
+                        docker push "$REGISTRY_REPO:latest"
+                        docker logout ghcr.io
                     '''
                 }
             }
         }
 
-        stage('Deploy to EKS (Ansible)') {
-            when { environment name: 'AWS_DEPLOY', value: 'true' }
+        stage('Deploy to AKS (Ansible)') {
+            when { environment name: 'CLOUD_DEPLOY', value: 'true' }
             steps {
-                withCredentials([usernamePassword(credentialsId: 'aws-creds',
-                        usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
                     sh '''
-                        export KUBECONFIG="$WORKSPACE/.kubeconfig"
-                        aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"
                         ansible-playbook -i ansible/inventory.ini ansible/deploy.yml \
-                          -e image="$(cat image.txt)" -e build="$GIT_SHA"
+                          -e image="$REGISTRY_REPO:$GIT_SHA" -e build="$GIT_SHA"
                     '''
                 }
             }
         }
 
         stage('Verify Deployment') {
-            when { environment name: 'AWS_DEPLOY', value: 'true' }
+            when { environment name: 'CLOUD_DEPLOY', value: 'true' }
             steps {
-                withCredentials([usernamePassword(credentialsId: 'aws-creds',
-                        usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
                     sh '''
-                        export KUBECONFIG="$WORKSPACE/.kubeconfig"
                         kubectl get deployment "$APP_NAME"
                         kubectl get pods -l app="$APP_NAME" -o wide
                         kubectl get service "$APP_NAME"
@@ -154,9 +146,6 @@ pipeline {
         }
         failure {
             echo 'Pipeline failed. Check the red stage in the Stage View for details.'
-        }
-        always {
-            sh 'rm -f .kubeconfig'
         }
     }
 }

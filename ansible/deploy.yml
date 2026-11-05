@@ -1,8 +1,8 @@
 ---
-# Deploys (or updates) the app on EKS and verifies it is reachable.
-# Called by the "Deploy to EKS" job in .github/workflows/ci-cd.yml:
-#   ansible-playbook -i ansible/inventory.ini ansible/deploy.yml -e image=<ecr-uri:sha> -e build=<sha>
-# Requires kubectl to already point at the cluster (aws eks update-kubeconfig).
+# Deploys (or updates) the app on Kubernetes (Azure AKS) and verifies it is reachable.
+# Called by the deploy stage of both GitHub Actions and Jenkins:
+#   ansible-playbook -i ansible/inventory.ini ansible/deploy.yml -e image=<ghcr image:sha> -e build=<sha>
+# Requires kubectl to already point at the cluster (KUBECONFIG of the CI service account).
 - name: Deploy java-cicd-demo to Kubernetes
   hosts: local
   gather_facts: false
@@ -44,10 +44,10 @@
       ansible.builtin.debug:
         var: k8s_state.stdout_lines
 
-    - name: Wait for the AWS load balancer hostname
+    - name: Wait for the cloud load balancer address (IP on Azure, hostname on AWS)
       ansible.builtin.command: >
         kubectl get service {{ app_name }}
-        -o jsonpath={.status.loadBalancer.ingress[0].hostname}
+        -o jsonpath={.status.loadBalancer.ingress[0].ip}{.status.loadBalancer.ingress[0].hostname}
       register: lb_host
       until: lb_host.stdout | length > 0
       retries: 30
@@ -59,7 +59,7 @@
         url: "http://{{ lb_host.stdout }}/api/info"
         return_content: true
       register: app_response
-      # New ELBs take a few minutes for DNS to resolve; old pods may still answer briefly.
+      # A new load balancer can take a few minutes; old pods may still answer briefly.
       until: app_response.status == 200 and app_response.json.build == build
       retries: 40
       delay: 15

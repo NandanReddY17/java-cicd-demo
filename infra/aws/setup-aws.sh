@@ -22,16 +22,16 @@ echo "ECR: $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO"
 
 echo "== 2. EKS cluster (takes ~15-20 minutes)"
 if ! aws eks describe-cluster --name "$CLUSTER" --region "$REGION" >/dev/null 2>&1; then
-  eksctl create cluster -f infra/eks-cluster.yaml
+  eksctl create cluster -f infra/aws/eks-cluster.yaml
 fi
 aws eks update-kubeconfig --name "$CLUSTER" --region "$REGION"
 kubectl get nodes
 
 echo "== 3. IAM user for GitHub Actions (least privilege)"
 aws iam get-user --user-name "$CI_USER" >/dev/null 2>&1 || aws iam create-user --user-name "$CI_USER" >/dev/null
-sed -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" -e "s/REGION/$REGION/g" infra/ci-iam-policy.json > /tmp/ci-policy.json
+POLICY=$(sed -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" -e "s/REGION/$REGION/g" infra/aws/ci-iam-policy.json)
 aws iam put-user-policy --user-name "$CI_USER" --policy-name cicd-ecr-eks \
-  --policy-document file:///tmp/ci-policy.json
+  --policy-document "$POLICY"
 
 echo "== 4. Allow the CI user to deploy into the 'default' namespace of the cluster"
 CI_ARN="arn:aws:iam::$ACCOUNT_ID:user/$CI_USER"
