@@ -19,7 +19,7 @@ class HomeControllerTest {
     void infoEndpointReturnsMessageAndVersion() throws Exception {
         mockMvc.perform(get("/api/info"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.message").value("Simple Calculator - deployed by my CI/CD pipeline"))
+            .andExpect(jsonPath("$.message").value("Simple Calculator v2 - auto-deployed to Azure AKS"))
             .andExpect(jsonPath("$.version").value("1.0.0"));
     }
 
