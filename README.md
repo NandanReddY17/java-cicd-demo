@@ -13,7 +13,7 @@ git push ──► GitHub Actions ──► Maven (compile, test, package) ─�
 | Concern | Tool |
 |---|---|
 | Source control | Git + GitHub |
-| CI/CD orchestration | GitHub Actions (`.github/workflows/ci-cd.yml`) |
+| CI/CD orchestration | GitHub Actions (`.github/workflows/ci-cd.yml`) and Jenkins (`Jenkinsfile`, `jenkins/`) |
 | Build & unit tests | Maven + JUnit 5 / MockMvc |
 | Containerisation | Docker (`Dockerfile`, `.dockerignore`) |
 | Registry | Amazon ECR (scan on push) |
@@ -57,6 +57,36 @@ infra/ci-iam-policy.json      least-privilege policy for the CI user
 | **Deploy to EKS & Verify** | `update-kubeconfig` → Ansible: render manifest, `kubectl apply`, `rollout status`, wait for LB, HTTP check that `build` == new SHA | proves the new version is live |
 
 Pull requests run only the first job.
+
+## Jenkins pipeline (`Jenkinsfile`)
+
+The same pipeline is also implemented in Jenkins, running in Docker on the developer PC.
+
+| Stage | What it does |
+|---|---|
+| Checkout | clone the commit, read the short Git SHA |
+| Compile / Unit Tests / Package | `mvn compile`, `mvn test` (JUnit report published), `mvn package` (JAR archived) |
+| Docker Build | `java-cicd-demo:<sha>` and `:latest` |
+| Container Smoke Test | start the new image, call `/api/calculate` (6×7 = 42) and `/api/info` (build = SHA) |
+| Push to Amazon ECR | only when `AWS_DEPLOY=true` |
+| Deploy to EKS (Ansible) | same `ansible/deploy.yml` as GitHub Actions |
+| Verify Deployment | `kubectl get deployment/pods/service`, rollout history |
+
+Jenkins itself is configured as code: `jenkins/Dockerfile` (Jenkins + Maven, Docker CLI, kubectl,
+AWS CLI, Ansible), `jenkins/plugins.txt`, and `jenkins/casc.yaml` (admin user, `AWS_DEPLOY` env var,
+and the `java-cicd-demo` pipeline job created with Job DSL). GitHub cannot reach a Jenkins running on a
+laptop, so the job **polls GitHub every minute** (`pollSCM`) instead of using a webhook.
+
+```bash
+cd jenkins
+cp .env.example .env          # set JENKINS_ADMIN_PASSWORD
+docker compose up -d --build  # http://localhost:8081  (user: admin)
+```
+
+To enable the AWS stages: in Jenkins add a *Username with password* credential with ID `aws-creds`
+(username = access key ID, password = secret key), set `AWS_DEPLOY=true` in `jenkins/.env`, then
+`docker compose up -d`. Enable AWS deploys in **either** Jenkins **or** GitHub Actions, not both,
+so the two pipelines don't deploy the same commit twice.
 
 ## Run locally
 
