@@ -1,0 +1,70 @@
+# Kubernetes Deployment for the Java app.
+# This is a Jinja2 template: Ansible (ansible/deploy.yml) fills in {{ image }}
+# and {{ build }} with the ECR image URI and Git commit SHA on every pipeline run.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: java-cicd-demo
+  labels:
+    app: java-cicd-demo
+  annotations:
+    kubernetes.io/change-cause: "Deployed build {{ build }} by GitHub Actions"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: java-cicd-demo
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1          # start one new pod at a time
+      maxUnavailable: 0    # never drop below 2 ready pods -> zero downtime
+  template:
+    metadata:
+      labels:
+        app: java-cicd-demo
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: java-cicd-demo
+          image: "{{ image }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: APP_BUILD
+              value: "{{ build }}"
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 40
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp   # Tomcat needs a writable temp dir
+      volumes:
+        - name: tmp
+          emptyDir: {}

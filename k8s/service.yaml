@@ -1,0 +1,16 @@
+# Exposes the pods to the internet through an AWS Elastic Load Balancer.
+# Port 80 on the load balancer -> port 8080 (named "http") in the container.
+apiVersion: v1
+kind: Service
+metadata:
+  name: java-cicd-demo
+  labels:
+    app: java-cicd-demo
+spec:
+  type: LoadBalancer
+  selector:
+    app: java-cicd-demo
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

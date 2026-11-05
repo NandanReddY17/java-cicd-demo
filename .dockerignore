@@ -1,0 +1,14 @@
+# Keep the build context small: only the packaged JAR is needed.
+target/*
+!target/java-cicd-demo.jar
+.git/
+.github/
+.vscode/
+.idea/
+*.iml
+*.md
+docs/
+k8s/
+ansible/
+infra/
+src/

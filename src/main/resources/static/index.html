@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Calculator</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 16px; padding: 16px;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: #eef1f5; color: #1f2933;
+    }
+    h1 { font-size: 1.25rem; margin: 0; text-align: center; }
+    .calc {
+      width: 100%; max-width: 340px; background: #1f2933; border-radius: 16px;
+      padding: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.2);
+    }
+    .display {
+      background: #111a22; color: #fff; border-radius: 10px; padding: 12px 14px;
+      text-align: right; margin-bottom: 12px; min-height: 84px;
+    }
+    .expr { font-size: .95rem; color: #9aa5b1; min-height: 1.2em; word-break: break-all; }
+    .value { font-size: 2rem; font-weight: 600; word-break: break-all; }
+    .value.error { font-size: 1.1rem; color: #ff8a80; }
+    .keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    button {
+      font: inherit; font-size: 1.2rem; padding: 16px 0; border: 0; border-radius: 10px;
+      background: #323f4b; color: #fff; cursor: pointer;
+    }
+    button:hover { filter: brightness(1.15); }
+    button.op { background: #3e6fd8; }
+    button.eq { background: #2f9e6e; }
+    button.clr { background: #9b3d3d; }
+    .info { font-size: .8rem; color: #52606d; text-align: center; }
+    code { background: #dde3ea; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1 id="title">Simple Calculator</h1>
+
+  <div class="calc">
+    <div class="display">
+      <div class="expr" id="expr"></div>
+      <div class="value" id="value">0</div>
+    </div>
+    <div class="keys">
+      <button class="clr" data-action="clear">C</button>
+      <button class="op" data-op="power">x<sup>y</sup></button>
+      <button class="op" data-op="modulo">%</button>
+      <button class="op" data-op="divide">&divide;</button>
+      <button data-digit="7">7</button><button data-digit="8">8</button><button data-digit="9">9</button>
+      <button class="op" data-op="multiply">&times;</button>
+      <button data-digit="4">4</button><button data-digit="5">5</button><button data-digit="6">6</button>
+      <button class="op" data-op="subtract">&minus;</button>
+      <button data-digit="1">1</button><button data-digit="2">2</button><button data-digit="3">3</button>
+      <button class="op" data-op="add">+</button>
+      <button data-action="sign">&plusmn;</button>
+      <button data-digit="0">0</button>
+      <button data-digit=".">.</button>
+      <button class="eq" data-action="equals">=</button>
+    </div>
+  </div>
+
+  <div class="info" id="info">Loading build info...</div>
+
+  <script>
+    // The page only collects input; the Java backend (/api/calculate) does the maths.
+    const symbols = { add: "+", subtract: "−", multiply: "×", divide: "÷", modulo: "%", power: "^" };
+    let current = "0", first = null, op = null, fresh = false;
+    const valueEl = document.getElementById("value");
+    const exprEl = document.getElementById("expr");
+
+    function show(text, isError) {
+      valueEl.textContent = text;
+      valueEl.classList.toggle("error", !!isError);
+    }
+
+    function inputDigit(d) {
+      if (fresh) { current = "0"; fresh = false; }
+      if (d === "." && current.includes(".")) return;
+      current = (current === "0" && d !== ".") ? d : current + d;
+      show(current);
+    }
+
+    async function equals() {
+      if (op === null || first === null) return;
+      const second = current;
+      exprEl.textContent = `${first} ${symbols[op]} ${second} =`;
+      try {
+        const url = `/api/calculate?a=${encodeURIComponent(first)}&b=${encodeURIComponent(second)}&op=${op}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!res.ok) { show(data.error, true); current = "0"; }
+        else { current = String(+data.result.toPrecision(12)); show(current); }
+      } catch (e) {
+        show("Server not reachable", true);
+      }
+      first = null; op = null; fresh = true;
+    }
+
+    async function chooseOp(nextOp) {
+      if (op !== null && !fresh) await equals();
+      first = current; op = nextOp; fresh = true;
+      exprEl.textContent = `${first} ${symbols[op]}`;
+    }
+
+    document.querySelector(".keys").addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      if (b.dataset.digit) inputDigit(b.dataset.digit);
+      else if (b.dataset.op) chooseOp(b.dataset.op);
+      else if (b.dataset.action === "equals") equals();
+      else if (b.dataset.action === "sign") { current = String(-parseFloat(current) || 0); show(current); }
+      else if (b.dataset.action === "clear") {
+        current = "0"; first = null; op = null; fresh = false; exprEl.textContent = ""; show("0");
+      }
+    });
+
+    // Header message and build info come from the Java app, so a code change shows up here.
+    fetch("/api/info").then(r => r.json()).then(info => {
+      document.getElementById("title").textContent = info.message;
+      document.getElementById("info").innerHTML =
+        `v${info.version} &middot; build <code>${info.build}</code> &middot; served by <code>${info.servedBy}</code>`;
+    }).catch(() => { document.getElementById("info").textContent = ""; });
+  </script>
+</body>
+</html>

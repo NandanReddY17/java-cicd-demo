@@ -1,0 +1,71 @@
+---
+# Deploys (or updates) the app on EKS and verifies it is reachable.
+# Called by the "Deploy to EKS" job in .github/workflows/ci-cd.yml:
+#   ansible-playbook -i ansible/inventory.ini ansible/deploy.yml -e image=<ecr-uri:sha> -e build=<sha>
+# Requires kubectl to already point at the cluster (aws eks update-kubeconfig).
+- name: Deploy java-cicd-demo to Kubernetes
+  hosts: local
+  gather_facts: false
+  vars:
+    app_name: java-cicd-demo
+    k8s_dir: "{{ playbook_dir }}/../k8s"
+    rendered_manifest: "/tmp/{{ app_name }}-deployment.yaml"
+
+  tasks:
+    - name: Check required variables were passed in
+      ansible.builtin.assert:
+        that:
+          - image is defined and image | length > 0
+          - build is defined and build | length > 0
+        fail_msg: "Pass -e image=<registry/repo:tag> -e build=<git sha>"
+
+    - name: Render Deployment manifest with the new image tag
+      ansible.builtin.template:
+        src: "{{ k8s_dir }}/deployment.yaml.j2"
+        dest: "{{ rendered_manifest }}"
+        mode: "0644"
+
+    - name: Apply Deployment and Service
+      ansible.builtin.command: >
+        kubectl apply -f {{ rendered_manifest }} -f {{ k8s_dir }}/service.yaml
+      register: apply_out
+      changed_when: "'configured' in apply_out.stdout or 'created' in apply_out.stdout"
+
+    - name: Wait for the rolling update to finish
+      ansible.builtin.command: kubectl rollout status deployment/{{ app_name }} --timeout=300s
+      changed_when: false
+
+    - name: Show deployment and pods
+      ansible.builtin.command: kubectl get deployment,pods,service -l app={{ app_name }} -o wide
+      register: k8s_state
+      changed_when: false
+
+    - name: Print cluster state
+      ansible.builtin.debug:
+        var: k8s_state.stdout_lines
+
+    - name: Wait for the AWS load balancer hostname
+      ansible.builtin.command: >
+        kubectl get service {{ app_name }}
+        -o jsonpath={.status.loadBalancer.ingress[0].hostname}
+      register: lb_host
+      until: lb_host.stdout | length > 0
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: Check the app answers through the load balancer with the new build
+      ansible.builtin.uri:
+        url: "http://{{ lb_host.stdout }}/api/info"
+        return_content: true
+      register: app_response
+      # New ELBs take a few minutes for DNS to resolve; old pods may still answer briefly.
+      until: app_response.status == 200 and app_response.json.build == build
+      retries: 40
+      delay: 15
+
+    - name: Deployment verified
+      ansible.builtin.debug:
+        msg:
+          - "Application URL: http://{{ lb_host.stdout }}/"
+          - "Response: {{ app_response.json }}"

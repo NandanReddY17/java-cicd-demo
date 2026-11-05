@@ -1,0 +1,28 @@
+# EKS cluster definition used by eksctl:
+#   eksctl create cluster -f infra/eks-cluster.yaml     (~15-20 min)
+#   eksctl delete cluster -f infra/eks-cluster.yaml     (after the viva, to stop charges)
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: java-cicd-cluster
+  region: ap-south-1
+  tags:
+    project: cia2-cicd
+
+vpc:
+  nat:
+    gateway: Disable   # saves ~USD 1/day; nodes run in public subnets, so no NAT is needed
+
+accessConfig:
+  authenticationMode: API_AND_CONFIG_MAP   # lets us grant the CI user access via EKS access entries
+
+managedNodeGroups:
+  - name: app-nodes
+    instanceType: t3.medium
+    desiredCapacity: 2
+    minSize: 1
+    maxSize: 3
+    volumeSize: 20
+    labels:
+      role: app
