@@ -1,6 +1,6 @@
 # Live Demo Checklist
 
-Before the viva: open these tabs — GitHub repo, GitHub Actions, ECR repo, EKS cluster, app URL — and a Git Bash terminal.
+Before the viva: open these tabs — GitHub repo, GitHub Actions, GitHub Packages, Azure portal (AKS), Jenkins (http://localhost:8081), app URL (http://4.224.118.106/) — and a terminal with `KUBECONFIG` set to `~/.kube/aks-java-cicd.yaml`.
 
 - [ ] GitHub repo: walk through `ci-cd.yml`, `Dockerfile`, `k8s/`, `ansible/deploy.yml`.
 - [ ] Actions: show the last green run (#7) with its 3 jobs.
@@ -11,6 +11,6 @@ Before the viva: open these tabs — GitHub repo, GitHub Actions, ECR repo, EKS 
 - [ ] Change the `message` (page title) in `HomeController.java` and the test, then `git commit -am "..." && git push`.
 - [ ] Show the pipeline starting by itself.
 - [ ] While it runs: `kubectl get pods -w` to show the rolling update (new pods start, old ones terminate).
-- [ ] Show the new SHA tag in ECR and `kubectl rollout history deployment/java-cicd-demo`.
+- [ ] Show the new SHA tag in GitHub Packages and `kubectl rollout history deployment/java-cicd-demo`.
 - [ ] Refresh the browser: new title, footer `build` = new SHA.
 - [ ] Explain where credentials are stored (GitHub secrets) and why nothing secret is in Git.
