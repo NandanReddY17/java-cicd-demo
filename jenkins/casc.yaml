@@ -25,7 +25,7 @@ unclassified:
 jobs:
   - script: |
       pipelineJob('java-cicd-demo') {
-        description('Calculator app: Maven -> Docker -> Amazon ECR -> Amazon EKS')
+        description('Calculator app: Maven -> Docker -> GitHub Container Registry -> Azure AKS')
         properties {
           pipelineTriggers {
             triggers {
