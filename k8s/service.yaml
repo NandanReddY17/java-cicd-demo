@@ -1,11 +1,15 @@
-# Exposes the pods to the internet through an AWS Elastic Load Balancer.
+# Exposes the pods to the internet through the Azure load balancer.
 # Port 80 on the load balancer -> port 8080 (named "http") in the container.
+# The DNS label gives the public IP a stable hostname:
+#   http://java-cicd-nandan.centralindia.cloudapp.azure.com/
 apiVersion: v1
 kind: Service
 metadata:
   name: java-cicd-demo
   labels:
     app: java-cicd-demo
+  annotations:
+    service.beta.kubernetes.io/azure-dns-label-name: java-cicd-nandan
 spec:
   type: LoadBalancer
   selector:
