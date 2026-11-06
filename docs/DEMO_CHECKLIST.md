@@ -1,6 +1,6 @@
 # Live Demo Checklist
 
-Before the viva: open these tabs — GitHub repo, GitHub Actions, GitHub Packages, Azure portal (AKS), Jenkins (http://localhost:8081), app URL (http://4.224.118.106/) — and a terminal with `KUBECONFIG` set to `~/.kube/aks-java-cicd.yaml`.
+Before the viva: open these tabs — GitHub repo, GitHub Actions, GitHub Packages, Azure portal (AKS), Jenkins (http://localhost:8081), app URL (http://java-cicd-nandan.centralindia.cloudapp.azure.com/) — and a terminal with `KUBECONFIG` set to `~/.kube/aks-java-cicd.yaml`.
 
 - [ ] GitHub repo: walk through `ci-cd.yml`, `Dockerfile`, `k8s/`, `ansible/deploy.yml`.
 - [ ] Actions: show the last green run (#7) with its 3 jobs.
