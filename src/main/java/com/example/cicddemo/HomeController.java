@@ -21,7 +21,7 @@ public class HomeController {
     @GetMapping("/api/info")
     public Map<String, String> info() {
         Map<String, String> body = new LinkedHashMap<>();
-        body.put("message", "Simple Calculator v2 - auto-deployed to Azure AKS");
+        body.put("message", "Simple Calculator v3 - auto-deployed to Azure AKS");
         body.put("version", "1.0.0");
         body.put("build", build);
         body.put("servedBy", servedBy);
