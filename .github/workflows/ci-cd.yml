@@ -22,9 +22,27 @@ permissions:
   contents: read
 
 jobs:
+  # ---------- Stage 0: secret scanning (quality/security gate) ----------
+  secret-scan:
+    name: Secret Scan (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full Git history
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0              # scan every commit, not just the latest snapshot
+
+      - name: Scan for committed secrets
+        # Fails the pipeline (exit code 1) if a password, API key, token or private key
+        # is found anywhere in the history. --redact hides the secret value in the log.
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1 \
+            git /repo --redact --verbose
+
   # ---------- Stage 1-3: checkout, compile/package, test ----------
   build-test:
     name: Build & Test (Maven)
+    needs: secret-scan
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source code

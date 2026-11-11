@@ -35,6 +35,18 @@ pipeline {
             }
         }
 
+        stage('Secret Scan (Gitleaks)') {
+            // Scans the whole Git history for passwords, API keys, tokens and private keys.
+            // A finding exits with code 1 and stops the pipeline before anything is built.
+            // The workspace lives in the jenkins_home volume, mounted read-only into Gitleaks.
+            steps {
+                sh '''
+                    docker run --rm -v jenkins_jenkins_home:/var/jenkins_home:ro \
+                      zricethezav/gitleaks:v8.30.1 git "$WORKSPACE" --redact --verbose
+                '''
+            }
+        }
+
         stage('Compile') {
             steps {
                 sh 'mvn -B compile'
