@@ -19,13 +19,14 @@ git push ──► GitHub Actions / Jenkins ──► Maven (compile, test, pack
 | Containerisation | Docker (`Dockerfile`, `.dockerignore`) |
 | Registry | GitHub Container Registry, `ghcr.io/nandanreddy17/java-cicd-demo` |
 | Orchestration | Azure Kubernetes Service (free control-plane tier), created with the Azure CLI |
+| Secret scanning | Gitleaks v8.30.1 (first stage of both pipelines) |
 | Deployment automation | Ansible (`ansible/deploy.yml`) |
 | Cloud | Microsoft Azure (free trial, spending limit on), region Central India |
 
 ## Repository layout
 
 ```
-.github/workflows/ci-cd.yml   GitHub Actions pipeline: build-test -> docker -> deploy
+.github/workflows/ci-cd.yml   GitHub Actions pipeline: secret-scan -> build-test -> docker -> deploy
 Jenkinsfile                   Jenkins pipeline (same stages + container smoke test)
 jenkins/                      Jenkins in Docker: Dockerfile, plugins.txt, casc.yaml, docker-compose.yml
 src/main/java/.../            CalculatorService (maths), CalculatorController (REST API), HomeController (info)
@@ -55,11 +56,12 @@ infra/aws/                    attempts on AWS EKS and Lightsail (blocked by the 
 
 | Job | Steps | Purpose |
 |---|---|---|
+| **Secret Scan** | Full-history checkout → Gitleaks (`--redact`) | a committed password, key or token stops everything |
 | **Build & Test** | Checkout → Compile → Run unit tests → Package JAR | fail fast; nothing broken gets an image |
 | **Docker Build & Push** | Login to ghcr.io with the built-in `GITHUB_TOKEN` → tag with Git SHA + `latest` → push | immutable, traceable artifact |
 | **Deploy to AKS & Verify** | kubeconfig from the `KUBECONFIG` secret → Ansible: render manifest, `kubectl apply`, `rollout status`, wait for the LB IP, HTTP check that `build` == new SHA | proves the new version is live |
 
-Pull requests run only the first job. The deploy job runs when the repository variable
+Pull requests run only the secret scan and build/test jobs. The deploy job runs when the repository variable
 `CLOUD_DEPLOY` is `true`.
 
 ## Jenkins pipeline (`Jenkinsfile`)
@@ -68,7 +70,8 @@ The same pipeline is also implemented in Jenkins, running in Docker on the devel
 
 | Stage | What it does |
 |---|---|
-| Checkout | clone the commit, read the short Git SHA |
+| Checkout | clone the commit (retried up to 3 times), read the short Git SHA |
+| Secret Scan (Gitleaks) | scan the full history; workspace mounted read-only into the Gitleaks container |
 | Compile / Unit Tests / Package | `mvn compile`, `mvn test` (JUnit report published), `mvn package` (JAR archived) |
 | Docker Build | `java-cicd-demo:<sha>` and `:latest` |
 | Container Smoke Test | start the new image, call `/api/calculate` (6×7 = 42) and `/api/info` (build = SHA) |
@@ -133,6 +136,9 @@ az group delete --name java-cicd-rg --yes --no-wait   # deletes AKS, its VM, dis
 
 ## Security notes
 
+- Gitleaks scans the full Git history at the start of every run of both pipelines and fails the run on any
+  finding. Run it locally with:
+  `docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1 git /repo --redact --verbose`
 - No secrets in Git: the CI kubeconfig lives in GitHub encrypted secrets / Jenkins credentials;
   `.gitignore` excludes kubeconfig files and `.env`.
 - The pipelines use a Kubernetes service account that can only manage Deployments and Services in the
