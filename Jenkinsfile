@@ -26,7 +26,10 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                checkout scm
+                // The build network intermittently drops TLS connections to GitHub, so retry.
+                retry(3) {
+                    checkout scm
+                }
                 script {
                     env.GIT_SHA = sh(script: 'git rev-parse --short=7 HEAD', returnStdout: true).trim()
                     env.LOCAL_IMAGE = "${env.APP_NAME}:${env.GIT_SHA}"
